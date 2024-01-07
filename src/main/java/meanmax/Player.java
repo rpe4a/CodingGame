@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 /**
  * Auto-generated code below aims at helping you parse
@@ -44,7 +45,7 @@ enum UnitType {
     }
 }
 
-record ManagerContext(Set<Unit> units, Map<UnitType, Map<Integer, Unit>> unitTypeRegistry, DistanceContext distanceContext) {
+record ManagerContext(Set<Unit> units, Map<UnitType, Map<Integer, Unit>> unitTypeRegistry, DistanceContext distanceContext, OptimizedContext optimizedContext) {
     static class Builder {
 
         private final Unit unit;
@@ -59,11 +60,70 @@ record ManagerContext(Set<Unit> units, Map<UnitType, Map<Integer, Unit>> unitTyp
             Map<UnitType, Map<Integer, Unit>> unitTypeRegistry = getUnitTypeRegistry(units);
             DistanceContext distanceContext = getDistanceContext(unit, unitTypeRegistry);
             OptimizedContext optimizedContext = getOptimizedContext(unit, unitTypeRegistry, distanceContext);
-            return new ManagerContext(units, unitTypeRegistry, distanceContext);
+            return new ManagerContext(units, unitTypeRegistry, distanceContext, optimizedContext);
         }
 
         private OptimizedContext getOptimizedContext(final Unit unit, final Map<UnitType, Map<Integer, Unit>> unitTypeRegistry, final DistanceContext distanceContext) {
+            Map<UnitType, Map<Unit, Double>> unitTypeOptimizedWeightMap = new EnumMap<>(Map.ofEntries(
+                    Map.entry(UnitType.Wreck, new HashMap<>()),
+                    Map.entry(UnitType.Reaper, new HashMap<>()),
+                    Map.entry(UnitType.Tanker, new HashMap<>()),
+                    Map.entry(UnitType.Doof, new HashMap<>()),
+                    Map.entry(UnitType.Destroyer, new HashMap<>())
+            ));
 
+            if (unit.getType() == UnitType.Reaper) {
+                if (!distanceContext.unitTypeDistanceMap().get(UnitType.Wreck).isEmpty()) {
+                    int sumDistance = distanceContext.unitTypeDistanceMap().get(UnitType.Wreck).stream().mapToInt(x -> x).sum();
+                    int sumOfWater = unitTypeRegistry.get(UnitType.Wreck).values().stream().mapToInt(x -> x.getExtra()).sum();
+
+                    for (var wreckEntry : unitTypeRegistry.get(UnitType.Wreck).entrySet()) {
+                        double distanceWeight = (double) distanceContext.otherUnitDistanceMap().get(wreckEntry.getValue()) / (double) sumDistance;
+                        double waterWeight = 1.0 - (double) wreckEntry.getValue().getExtra() / (double) sumOfWater;
+                        unitTypeOptimizedWeightMap.get(UnitType.Wreck).put(wreckEntry.getValue(), distanceWeight + waterWeight);
+                    }
+                }
+
+                if (!distanceContext.unitTypeDistanceMap().get(UnitType.Reaper).isEmpty()) {
+                    int sumDistance = distanceContext.unitTypeDistanceMap().get(UnitType.Reaper).stream().mapToInt(x -> x).sum();
+
+                    for (var reaperEntry : unitTypeRegistry.get(UnitType.Reaper).entrySet()) {
+                        if (reaperEntry.getValue().getPlayerId() != Player.ID) {
+                            double distanceWeight = (double) distanceContext.otherUnitDistanceMap().get(reaperEntry.getValue()) / (double) sumDistance;
+                            unitTypeOptimizedWeightMap.get(UnitType.Reaper).put(reaperEntry.getValue(), distanceWeight);
+                        }
+                    }
+                }
+
+            }
+
+            if (unit.getType() == UnitType.Destroyer) {
+                if (!distanceContext.unitTypeDistanceMap().get(UnitType.Tanker).isEmpty()) {
+                    int sumDistance = distanceContext.unitTypeDistanceMap().get(UnitType.Tanker).stream().mapToInt(x -> x).sum();
+                    int sumOfWater = unitTypeRegistry.get(UnitType.Tanker).values().stream().mapToInt(x -> x.getExtra()).sum();
+
+                    for (var wreckEntry : unitTypeRegistry.get(UnitType.Tanker).entrySet()) {
+                        double distanceWeight = (double) distanceContext.otherUnitDistanceMap().get(wreckEntry.getValue()) / (double) sumDistance;
+                        double waterWeight = 1.0 - (double) wreckEntry.getValue().getExtra() / (double) sumOfWater;
+                        unitTypeOptimizedWeightMap.get(UnitType.Tanker).put(wreckEntry.getValue(), distanceWeight + waterWeight);
+                    }
+                }
+            }
+
+            if (unit.getType() == UnitType.Doof) {
+                if (!distanceContext.unitTypeDistanceMap().get(UnitType.Reaper).isEmpty()) {
+                    int sumDistance = distanceContext.unitTypeDistanceMap().get(UnitType.Reaper).stream().mapToInt(x -> x).sum();
+
+                    for (var reaperEntry : unitTypeRegistry.get(UnitType.Reaper).entrySet()) {
+                        if (reaperEntry.getValue().getPlayerId() != Player.ID) {
+                            double distanceWeight = (double) distanceContext.otherUnitDistanceMap().get(reaperEntry.getValue()) / (double) sumDistance;
+                            unitTypeOptimizedWeightMap.get(UnitType.Reaper).put(reaperEntry.getValue(), distanceWeight);
+                        }
+                    }
+                }
+            }
+
+            return new OptimizedContext(unitTypeOptimizedWeightMap);
         }
 
         public Map<UnitType, Map<Integer, Unit>> getUnitTypeRegistry(Set<Unit> units) {
@@ -116,7 +176,7 @@ record ManagerContext(Set<Unit> units, Map<UnitType, Map<Integer, Unit>> unitTyp
 
 record DistanceContext(Map<Unit, Integer> otherUnitDistanceMap, Map<Integer, Unit> distanceForOtherUnitMap, Map<UnitType, List<Integer>> unitTypeDistanceMap) { }
 
-record OptimizedContext() { }
+record OptimizedContext(Map<UnitType, Map<Unit, Double>> unitTypeOptimizedWeightMap) { }
 
 class Unit {
     private int id;
@@ -254,17 +314,21 @@ class Player {
             // Write an action using System.out.println()
             // To debug: System.err.println("Debug messages...");
 
-            ManagerContext reaperContext = new ManagerContext.Builder(reaper, units).create();
-            ManagerContext destroyerContext = new ManagerContext.Builder(destroyer, units).create();
-            ManagerContext doofContext = new ManagerContext.Builder(doof, units).create();
+//            ManagerContext reaperContext = new ManagerContext.Builder(reaper, units).create();
+//            ManagerContext destroyerContext = new ManagerContext.Builder(destroyer, units).create();
+//            ManagerContext doofContext = new ManagerContext.Builder(doof, units).create();
+//
+//            ReaperManager reaperManager = new ReaperManager(reaper, reaperContext);
+//            DestroyerManager destroyerManager = new DestroyerManager(destroyer, destroyerContext);
+//            DoofManager doofManager = new DoofManager(doof, doofContext);
+//
+//            reaperManager.update();
+//            destroyerManager.update();
+//            doofManager.update();
 
-            ReaperManager reaperManager = new ReaperManager(reaper, reaperContext);
-            DestroyerManager destroyerManager = new DestroyerManager(destroyer, destroyerContext);
-            DoofManager doofManager = new DoofManager(doof, doofContext);
-
-            reaperManager.update();
-            destroyerManager.update();
-            doofManager.update();
+            System.out.println("WAIT");
+            System.out.println("WAIT");
+            System.out.println("WAIT");
         }
     }
 }
@@ -312,26 +376,31 @@ abstract class BaseManager {
                 .get();
     }
 
-    protected Unit getClosedOptimizedUnit(UnitType unitType) {
-        int sumDistance = context.distanceContext().unitTypeDistanceMap().get(unitType).stream().mapToInt(x -> x).sum();
-        int sumOfWater = context.unitTypeRegistry().get(unitType).values().stream().mapToInt(x -> x.getExtra()).sum();
-        HashMap<Unit, Double> pointMap = new HashMap<>();
-        for (var unitEntry : context.unitTypeRegistry().get(unitType).entrySet()) {
-            double distanceWeight = (double) context.distanceContext().otherUnitDistanceMap().get(unitEntry.getValue()) / (double) sumDistance;
-            double waterWeight = 1.0 - (double) unitEntry.getValue().getExtra() / (double) sumOfWater;
-            pointMap.put(unitEntry.getValue(), distanceWeight + waterWeight);
+    protected List<Map.Entry<Unit, Double>> getClosedOptimizedUnits(UnitType unitType) {
+        if (context.optimizedContext()
+                .unitTypeOptimizedWeightMap()
+                .get(unitType).isEmpty()) {
+            return new ArrayList<>();
         }
 
-        double minWeight = Double.MAX_VALUE;
-        Unit best = null;
-        for (var unitEntry : pointMap.entrySet()) {
-            minWeight = Math.min(unitEntry.getValue(), minWeight);
-            if (minWeight == unitEntry.getValue()) {
-                best = unitEntry.getKey();
-            }
-        }
+        return context.optimizedContext()
+                .unitTypeOptimizedWeightMap()
+                .get(unitType)
+                .entrySet()
+                .stream()
+                .sorted(Map.Entry.comparingByValue())
+                .collect(Collectors.toList());
 
-        return best;
+//        double minWeight = Double.MAX_VALUE;
+//        Unit best = null;
+//        for (var unitEntry : pointMap.entrySet()) {
+//            minWeight = Math.min(unitEntry.getValue(), minWeight);
+//            if (minWeight == unitEntry.getValue()) {
+//                best = unitEntry.getKey();
+//            }
+//        }
+//
+//        return best;
     }
 }
 
@@ -350,7 +419,8 @@ class ReaperManager extends BaseManager {
         Unit closestUnit = null;
 
         if (context.unitTypeRegistry().get(UnitType.Wreck).size() > 0) {
-            closestUnit = getClosedOptimizedUnit(UnitType.Wreck);
+            List<Map.Entry<Unit, Double>> optimizedUnits = getClosedOptimizedUnits(UnitType.Wreck);
+            closestUnit = optimizedUnits.get(0).getKey();
         }
 
         if (closestUnit == null) {
@@ -393,7 +463,8 @@ class DestroyerManager extends BaseManager {
         Unit closestUnit = null;
 
         if (context.unitTypeRegistry().get(UnitType.Tanker).size() > 0) {
-            closestUnit = getClosedOptimizedUnit(UnitType.Tanker);
+            List<Map.Entry<Unit, Double>> optimizedUnits = getClosedOptimizedUnits(UnitType.Tanker);
+            closestUnit = optimizedUnits.get(0).getKey();
         }
 
         System.err.println("****DESTROYER****");
@@ -427,7 +498,8 @@ class DoofManager extends BaseManager {
         Unit closestUnit = null;
 
         if (context.unitTypeRegistry().get(UnitType.Reaper).size() > 0) {
-            closestUnit = getClosedOptimizedUnit(UnitType.Reaper);
+            List<Map.Entry<Unit, Double>> optimizedUnits = getClosedOptimizedUnits(UnitType.Reaper);
+            closestUnit = optimizedUnits.get(0).getKey();
         }
 
         System.err.println("****DOOF****");
