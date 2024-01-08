@@ -1,4 +1,5 @@
 import java.awt.Point;
+import java.awt.geom.Point2D;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -50,10 +51,12 @@ record ManagerContext(Set<Unit> units, Map<UnitType, Map<Integer, Unit>> unitTyp
 
         private final Unit unit;
         private final Set<Unit> units;
+        private final GameContext gameContext;
 
-        public Builder(final Unit unit, Set<Unit> units) {
+        public Builder(final Unit unit, Set<Unit> units, final GameContext gameContext) {
             this.unit = unit;
             this.units = units;
+            this.gameContext = gameContext;
         }
 
         public ManagerContext create() {
@@ -83,18 +86,6 @@ record ManagerContext(Set<Unit> units, Map<UnitType, Map<Integer, Unit>> unitTyp
                         unitTypeOptimizedWeightMap.get(UnitType.Wreck).put(wreckEntry.getValue(), distanceWeight + waterWeight);
                     }
                 }
-
-                if (!distanceContext.unitTypeDistanceMap().get(UnitType.Reaper).isEmpty()) {
-                    int sumDistance = distanceContext.unitTypeDistanceMap().get(UnitType.Reaper).stream().mapToInt(x -> x).sum();
-
-                    for (var reaperEntry : unitTypeRegistry.get(UnitType.Reaper).entrySet()) {
-                        if (reaperEntry.getValue().getPlayerId() != Player.ID) {
-                            double distanceWeight = (double) distanceContext.otherUnitDistanceMap().get(reaperEntry.getValue()) / (double) sumDistance;
-                            unitTypeOptimizedWeightMap.get(UnitType.Reaper).put(reaperEntry.getValue(), distanceWeight);
-                        }
-                    }
-                }
-
             }
 
             if (unit.getType() == UnitType.Destroyer) {
@@ -108,16 +99,32 @@ record ManagerContext(Set<Unit> units, Map<UnitType, Map<Integer, Unit>> unitTyp
                         unitTypeOptimizedWeightMap.get(UnitType.Tanker).put(wreckEntry.getValue(), distanceWeight + waterWeight);
                     }
                 }
-            }
 
-            if (unit.getType() == UnitType.Doof) {
                 if (!distanceContext.unitTypeDistanceMap().get(UnitType.Reaper).isEmpty()) {
                     int sumDistance = distanceContext.unitTypeDistanceMap().get(UnitType.Reaper).stream().mapToInt(x -> x).sum();
 
                     for (var reaperEntry : unitTypeRegistry.get(UnitType.Reaper).entrySet()) {
-                        if (reaperEntry.getValue().getPlayerId() != Player.ID) {
+                        if (reaperEntry.getValue().getPlayerId() != Player.MyTeamId) {
                             double distanceWeight = (double) distanceContext.otherUnitDistanceMap().get(reaperEntry.getValue()) / (double) sumDistance;
                             unitTypeOptimizedWeightMap.get(UnitType.Reaper).put(reaperEntry.getValue(), distanceWeight);
+                        }
+                    }
+                }
+            }
+
+            if (unit.getType() == UnitType.Doof) {
+                if (!distanceContext.unitTypeDistanceMap().get(UnitType.Reaper).isEmpty()) {
+                    int sumScore = Math.max(gameContext.enemy1().getScore() + gameContext.enemy2().getScore(), 1);
+
+                    for (var reaperEntry : unitTypeRegistry.get(UnitType.Reaper).entrySet()) {
+                        if (reaperEntry.getValue().getPlayerId() != gameContext.my().getId()) {
+                            double scoreWeight;
+                            if (reaperEntry.getValue().getPlayerId() == gameContext.enemy1().getId()) {
+                                scoreWeight = 1.0 - (double) gameContext.enemy1().getScore() / (double) sumScore;
+                            } else {
+                                scoreWeight = 1.0 - (double) gameContext.enemy2().getScore() / (double) sumScore;
+                            }
+                            unitTypeOptimizedWeightMap.get(UnitType.Reaper).put(reaperEntry.getValue(), scoreWeight);
                         }
                     }
                 }
@@ -174,6 +181,59 @@ record ManagerContext(Set<Unit> units, Map<UnitType, Map<Integer, Unit>> unitTyp
     }
 }
 
+class Team {
+    private final int id;
+    private final int score;
+    private final int rage;
+    private Unit Reaper = null;
+    private Unit Destroyer = null;
+    private Unit Doof = null;
+
+    public Team(int id, int score, int rage) {
+        this.id = id;
+        this.score = score;
+        this.rage = rage;
+    }
+
+    public int getId() {
+        return id;
+    }
+
+    public int getScore() {
+        return score;
+    }
+
+    public int getRage() {
+        return rage;
+    }
+
+    public Unit getDestroyer() {
+        return Destroyer;
+    }
+
+    public void setDestroyer(final Unit destroyer) {
+        Destroyer = destroyer;
+    }
+
+    public Unit getDoof() {
+        return Doof;
+    }
+
+    public void setDoof(final Unit doof) {
+        Doof = doof;
+    }
+
+    public Unit getReaper() {
+        return Reaper;
+    }
+
+    public void setReaper(final Unit reaper) {
+        Reaper = reaper;
+    }
+}
+
+record GameContext(Team my, Team enemy1, Team enemy2) { }
+
 record DistanceContext(Map<Unit, Integer> otherUnitDistanceMap, Map<Integer, Unit> distanceForOtherUnitMap, Map<UnitType, List<Integer>> unitTypeDistanceMap) { }
 
 record OptimizedContext(Map<UnitType, Map<Unit, Double>> unitTypeOptimizedWeightMap) { }
@@ -199,6 +259,10 @@ class Unit {
         this.speed = speed;
         this.extra = extra;
         this.extra2 = extra2;
+    }
+
+    public Point getSpeed() {
+        return speed;
     }
 
     public int getPlayerId() {
@@ -260,11 +324,17 @@ class Unit {
     public int getDistanceTo(Unit other) {
         return (int) position.distance(other.position);
     }
+
+    public boolean isLocatedInRadius(Unit other, int radius) {
+        return Math.pow(position.x - other.getPosition().x, 2) + Math.pow(position.y - other.getPosition().y, 2) < radius * radius;
+    }
 }
 
 class Player {
 
-    public static final int ID = 0;
+    public static final int MyTeamId = 0;
+    public static final int Team1Id = 1;
+    public static final int Team2Id = 2;
 
     public static void main(String args[]) {
         Scanner in = new Scanner(System.in);
@@ -272,9 +342,6 @@ class Player {
         // game loop
         while (true) {
             Set<Unit> units = new HashSet<>();
-            Unit reaper = null;
-            Unit destroyer = null;
-            Unit doof = null;
 
             int myScore = in.nextInt();
             int enemyScore1 = in.nextInt();
@@ -283,6 +350,10 @@ class Player {
             int enemyRage1 = in.nextInt();
             int enemyRage2 = in.nextInt();
             int unitCount = in.nextInt();
+
+            Team my = new Team(MyTeamId, myScore, myRage);
+            Team enemy1 = new Team(Team1Id, enemyScore1, enemyRage1);
+            Team enemy2 = new Team(Team2Id, enemyScore2, enemyRage2);
             for (int i = 0; i < unitCount; i++) {
                 int unitId = in.nextInt();
                 int unitType = in.nextInt();
@@ -297,14 +368,40 @@ class Player {
                 int extra2 = in.nextInt();
 
                 UnitType unitTypeEnum = UnitType.fromInt(unitType);
-                if (player == ID && unitTypeEnum == UnitType.Reaper) {
-                    reaper = new Unit(unitId, unitTypeEnum, player, mass, radius, new Point(x, y), new Point(vx, vy), extra, extra2);
+
+                if (unitTypeEnum == UnitType.Reaper) {
+                    Unit reaper = new Unit(unitId, unitTypeEnum, player, mass, radius, new Point(x, y), new Point(vx, vy), extra, extra2);
+                    if (player == my.getId()) {
+                        my.setReaper(reaper);
+                    }
+                    if (player == enemy1.getId()) {
+                        enemy1.setReaper(reaper);
+                    } else {
+                        enemy2.setReaper(reaper);
+                    }
                 }
-                if (player == ID && unitTypeEnum == UnitType.Destroyer) {
-                    destroyer = new Unit(unitId, unitTypeEnum, player, mass, radius, new Point(x, y), new Point(vx, vy), extra, extra2);
+
+                if (unitTypeEnum == UnitType.Destroyer) {
+                    Unit destroyer = new Unit(unitId, unitTypeEnum, player, mass, radius, new Point(x, y), new Point(vx, vy), extra, extra2);
+                    if (player == my.getId()) {
+                        my.setDestroyer(destroyer);
+                    }
+                    if (player == enemy1.getId()) {
+                        enemy1.setDestroyer(destroyer);
+                    } else {
+                        enemy2.setDestroyer(destroyer);
+                    }
                 }
-                if (player == ID && unitTypeEnum == UnitType.Doof) {
-                    doof = new Unit(unitId, unitTypeEnum, player, mass, radius, new Point(x, y), new Point(vx, vy), extra, extra2);
+                if (unitTypeEnum == UnitType.Doof) {
+                    Unit doof = new Unit(unitId, unitTypeEnum, player, mass, radius, new Point(x, y), new Point(vx, vy), extra, extra2);
+                    if (player == my.getId()) {
+                        my.setDoof(doof);
+                    }
+                    if (player == enemy1.getId()) {
+                        enemy1.setDoof(doof);
+                    } else {
+                        enemy2.setDoof(doof);
+                    }
                 }
 
                 units.add(new Unit(unitId, unitTypeEnum, player, mass, radius, new Point(x, y), new Point(vx, vy), extra, extra2));
@@ -314,21 +411,22 @@ class Player {
             // Write an action using System.out.println()
             // To debug: System.err.println("Debug messages...");
 
-//            ManagerContext reaperContext = new ManagerContext.Builder(reaper, units).create();
-//            ManagerContext destroyerContext = new ManagerContext.Builder(destroyer, units).create();
-//            ManagerContext doofContext = new ManagerContext.Builder(doof, units).create();
-//
-//            ReaperManager reaperManager = new ReaperManager(reaper, reaperContext);
-//            DestroyerManager destroyerManager = new DestroyerManager(destroyer, destroyerContext);
-//            DoofManager doofManager = new DoofManager(doof, doofContext);
-//
-//            reaperManager.update();
-//            destroyerManager.update();
-//            doofManager.update();
+            GameContext gameContext = new GameContext(my, enemy1, enemy2);
+            ManagerContext reaperContext = new ManagerContext.Builder(my.getReaper(), units, gameContext).create();
+            ManagerContext destroyerContext = new ManagerContext.Builder(my.getDestroyer(), units, gameContext).create();
+            ManagerContext doofContext = new ManagerContext.Builder(my.getDoof(), units, gameContext).create();
 
-            System.out.println("WAIT");
-            System.out.println("WAIT");
-            System.out.println("WAIT");
+            ReaperManager reaperManager = new ReaperManager(my.getReaper(), reaperContext, gameContext);
+            DestroyerManager destroyerManager = new DestroyerManager(my.getDestroyer(), destroyerContext, gameContext);
+            DoofManager doofManager = new DoofManager(my.getDoof(), doofContext, gameContext);
+
+            reaperManager.update();
+            destroyerManager.update();
+            doofManager.update();
+
+//            System.out.println("WAIT");
+//            System.out.println("WAIT");
+//            System.out.println("WAIT");
         }
     }
 }
@@ -336,10 +434,12 @@ class Player {
 abstract class BaseManager {
     protected final Unit unit;
     protected final ManagerContext context;
+    protected final GameContext gameContext;
 
-    public BaseManager(Unit unit, ManagerContext context) {
+    public BaseManager(Unit unit, ManagerContext context, final GameContext gameContext) {
         this.unit = unit;
         this.context = context;
+        this.gameContext = gameContext;
     }
 
     public abstract void update();
@@ -376,6 +476,10 @@ abstract class BaseManager {
                 .get();
     }
 
+    protected void use(final Point position) {
+        System.out.println("SKILL " + position.x + " " + position.y);
+    }
+
     protected List<Map.Entry<Unit, Double>> getClosedOptimizedUnits(UnitType unitType) {
         if (context.optimizedContext()
                 .unitTypeOptimizedWeightMap()
@@ -390,58 +494,59 @@ abstract class BaseManager {
                 .stream()
                 .sorted(Map.Entry.comparingByValue())
                 .collect(Collectors.toList());
-
-//        double minWeight = Double.MAX_VALUE;
-//        Unit best = null;
-//        for (var unitEntry : pointMap.entrySet()) {
-//            minWeight = Math.min(unitEntry.getValue(), minWeight);
-//            if (minWeight == unitEntry.getValue()) {
-//                best = unitEntry.getKey();
-//            }
-//        }
-//
-//        return best;
     }
 }
 
 class ReaperManager extends BaseManager {
-    private static final int SLOWDOWN_DISTANCE = 3000;
+    private static final int SLOWDOWN_DISTANCE = 1200;
     private static final int MAX_SPEED = 300;
     private static final int AVERAGE_SPEED = 200;
     private static final double MASS = 1;
     private static final double FRICTION = 0.2;
 
-    public ReaperManager(Unit unit, final ManagerContext context) {
-        super(unit, context);
+    public ReaperManager(Unit unit, final ManagerContext context, final GameContext gameContext) {
+        super(unit, context, gameContext);
     }
 
     public void update() {
+        System.err.println("****REAPER****");
+        System.err.println(unit);
+
         Unit closestUnit = null;
 
         if (context.unitTypeRegistry().get(UnitType.Wreck).size() > 0) {
-            List<Map.Entry<Unit, Double>> optimizedUnits = getClosedOptimizedUnits(UnitType.Wreck);
-            closestUnit = optimizedUnits.get(0).getKey();
+            List<Map.Entry<Unit, Double>> optimizedWrecks = getClosedOptimizedUnits(UnitType.Wreck);
+            closestUnit = optimizedWrecks.get(0).getKey();
         }
 
         if (closestUnit == null) {
-            closestUnit = getUnitByTypeAndQuery(UnitType.Destroyer, context, x -> x.getPlayerId() == Player.ID);
+            closestUnit = getUnitByTypeAndQuery(UnitType.Destroyer, context, x -> x.getPlayerId() == gameContext.my().getId());
         }
 
-        System.err.println("****REAPER****");
-        System.err.println(unit);
         System.err.println(closestUnit);
         System.err.println((context.distanceContext().otherUnitDistanceMap().get(closestUnit)));
 
-        //        if (context.distanceContext().otherUnitDistanceMap().get(closestReaper) <= reaper.getRadius() * 3 + closestReaper.getRadius() * 2) {
-//            Unit longestWreck = getUnitByTypeAndIndex(1, UnitType.Wreck, context.distanceContext());
-//            update(longestWreck.getPosition(), MAX_SPEED * Math.min(context.distanceContext().otherUnitDistanceMap().get(closestWreck), SLOWDOWN_DISTANCE) / SLOWDOWN_DISTANCE + 50);
-//        } else
-        if (context.distanceContext().otherUnitDistanceMap().get(closestUnit) >= SLOWDOWN_DISTANCE) {
-            go(closestUnit.getPosition(), MAX_SPEED * Math.min(context.distanceContext().otherUnitDistanceMap().get(closestUnit), SLOWDOWN_DISTANCE) / SLOWDOWN_DISTANCE);
-        } else if (context.distanceContext().otherUnitDistanceMap().get(closestUnit) < SLOWDOWN_DISTANCE && context.distanceContext().otherUnitDistanceMap().get(closestUnit) > closestUnit.getRadius() - unit.getRadius() * 2) {
-            go(closestUnit.getPosition(), AVERAGE_SPEED * Math.min(context.distanceContext().otherUnitDistanceMap().get(closestUnit), SLOWDOWN_DISTANCE) / SLOWDOWN_DISTANCE + 50);
+        double magnitudeSpeed = Math.sqrt(Math.pow(unit.getSpeed().getX(), 2) + Math.pow(unit.getSpeed().getY(), 2));
+        System.err.println("speed vector magnitude: " + magnitudeSpeed + "; " + unit.getSpeed());
+
+        Point2D directionSpeed = new Point2D.Double(
+                (unit.getSpeed().getX()) / magnitudeSpeed,
+                (unit.getSpeed().getY()) / magnitudeSpeed);
+        System.err.println("speed vector direction: " + directionSpeed + "; " + unit.getSpeed());
+
+        double vx = closestUnit.getPosition().getX() - unit.getPosition().getX();
+        double vy = closestUnit.getPosition().getY() - unit.getPosition().getY();
+        double sin = vy / context.distanceContext().otherUnitDistanceMap().get(closestUnit);
+        double cos = vx / context.distanceContext().otherUnitDistanceMap().get(closestUnit);
+
+        if (context.distanceContext().otherUnitDistanceMap().get(closestUnit) <= closestUnit.getRadius() * 2) {
+            go(closestUnit.getPosition(), 200);
+        } else if (context.distanceContext().otherUnitDistanceMap().get(closestUnit) <= closestUnit.getRadius()) {
+            go(closestUnit.getPosition(), 100);
         } else {
-            stop();
+            var x1 = closestUnit.getPosition().getX() + closestUnit.getRadius() * 2 * cos;
+            var y1 = closestUnit.getPosition().getY() + closestUnit.getRadius() * 2 * sin;
+            go(new Point((int) x1, (int) y1), 300);
         }
     }
 }
@@ -451,33 +556,44 @@ class DestroyerManager extends BaseManager {
     public static final int MIN_WATER_TANK = 1;
     private static final int SLOWDOWN_DISTANCE = 2000;
     private static final int MAX_SPEED = 300;
+    private static final int MAX_POSITION = 6000;
     private static final int AVERAGE_SPEED = 200;
     private static final double MASS = 1.5;
     private static final double FRICTION = 0.3;
+    private static final int BOOM_RADIUS = 1000;
 
-    public DestroyerManager(Unit unit, final ManagerContext context) {
-        super(unit, context);
+    public DestroyerManager(Unit unit, final ManagerContext context, final GameContext gameContext) {
+        super(unit, context, gameContext);
     }
 
     public void update() {
+        System.err.println("****DESTROYER****");
+        System.err.println(unit);
         Unit closestUnit = null;
+
+        if (context.unitTypeRegistry().get(UnitType.Reaper).size() > 0) {
+            List<Map.Entry<Unit, Double>> optimizedReapers = getClosedOptimizedUnits(UnitType.Reaper);
+            if (optimizedReapers.stream().anyMatch(r -> gameContext.my().getReaper().isLocatedInRadius(r.getKey(), BOOM_RADIUS))) {
+                use(gameContext.my().getReaper().getPosition());
+                return;
+            }
+        }
 
         if (context.unitTypeRegistry().get(UnitType.Tanker).size() > 0) {
             List<Map.Entry<Unit, Double>> optimizedUnits = getClosedOptimizedUnits(UnitType.Tanker);
             closestUnit = optimizedUnits.get(0).getKey();
         }
 
-        System.err.println("****DESTROYER****");
-        System.err.println(unit);
         System.err.println(closestUnit);
         System.err.println((context.distanceContext().otherUnitDistanceMap().get(closestUnit)));
 
-        if (closestUnit == null) {
+        if (closestUnit == null
+                || Math.pow(closestUnit.getPosition().x, 2) + Math.pow(closestUnit.getPosition().y, 2) >= MAX_POSITION * MAX_POSITION) {
             stop();
         } else {
             go(closestUnit.getPosition(), MAX_SPEED);
-        }
 
+        }
     }
 }
 
@@ -490,11 +606,14 @@ class DoofManager extends BaseManager {
     private static final double MASS = 1.5;
     private static final double FRICTION = 0.3;
 
-    public DoofManager(Unit unit, final ManagerContext context) {
-        super(unit, context);
+    public DoofManager(Unit unit, final ManagerContext context, final GameContext gameContext) {
+        super(unit, context, gameContext);
     }
 
     public void update() {
+        System.err.println("****DOOF****");
+        System.err.println(unit);
+
         Unit closestUnit = null;
 
         if (context.unitTypeRegistry().get(UnitType.Reaper).size() > 0) {
@@ -502,8 +621,6 @@ class DoofManager extends BaseManager {
             closestUnit = optimizedUnits.get(0).getKey();
         }
 
-        System.err.println("****DOOF****");
-        System.err.println(unit);
         System.err.println(closestUnit);
         System.err.println((context.distanceContext().otherUnitDistanceMap().get(closestUnit)));
 
